@@ -855,7 +855,6 @@ export default function InvoiceEditor() {
               <div>
                 <p className="text-sm text-muted-foreground">Invoice Total</p>
                 <p className="text-3xl font-bold font-heading text-foreground">${totalAmount.toFixed(2)}</p>
-                <p className="text-xs text-muted-foreground mt-1">Labour only (hours × rate). Add travel/expenses optionally when generating the invoice PDF.</p>
               </div>
               <div className="text-right text-sm text-muted-foreground">
                 <p>{shifts.length} shift{shifts.length !== 1 ? 's' : ''}</p>

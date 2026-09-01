@@ -20,17 +20,13 @@ export default function Auth() {
     try {
       if (isSignUp) {
         await signUp(email, password);
-        toast({
-          title: 'Account created',
-          description: 'Check your email to confirm, then sign in.',
-        });
+        toast({ title: 'Account created! 🎉', description: 'Check your email to confirm.' });
       } else {
         await signIn(email, password);
-        toast({ title: 'Welcome back' });
+        toast({ title: 'Welcome back! 💛' });
       }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Something went wrong';
-      toast({ title: 'Error', description: message, variant: 'destructive' });
+    } catch (err: any) {
+      toast({ title: 'Oops!', description: err.message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -70,7 +66,7 @@ export default function Auth() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={8}
+                minLength={6}
               />
               <Button type="submit" className="w-full gradient-primary text-primary-foreground" disabled={loading}>
                 {loading ? 'Loading...' : isSignUp ? 'Sign Up' : 'Sign In'}

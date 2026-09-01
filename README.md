@@ -1,8 +1,8 @@
 # SupportMate
 
-Invoice generator for support workers — clients, shifts, calculations, and PDF invoices.
+Local NDIS invoicing app for support workers — clients, shifts, calculations, and PDF invoices. Data is stored in SQLite on your Mac.
 
-## Local development
+## Run locally
 
 Requirements: Node.js 18+ and npm.
 
@@ -11,14 +11,17 @@ npm install
 npm run dev
 ```
 
-Opens the Vite frontend at **http://localhost:8080**. Data and auth use Supabase.
+Opens the app at **http://localhost:8080** (Vite frontend + Express/SQLite API on port 3001).
+
+You can also double-click **SupportMate.command** in Finder to start the dev server and open the browser.
 
 Other scripts:
 
 - `npm run build` — production frontend build
-- `npm run build:pages` — build for GitHub Pages
+- `npm start` — run the API server in production mode (serves built frontend)
 - `npm run test` — unit tests (Vitest)
+- `npm run test:blackbox` — API integration tests against SQLite
 
-## Deploy
+## shiftHug
 
-GitHub Pages: https://coconuthaven.github.io/shiftHug/
+The cloud-hosted Supabase version is **[shiftHug](https://github.com/coconutHaven/shiftHug)** — deployed to GitHub Pages. It uses separate line items for labour, travel, and expenses on invoices. SupportMate folds km and expenses into the invoice hours total at the client's hourly rate.

@@ -10,6 +10,7 @@ import Dashboard from "@/pages/Dashboard";
 import ClientsPage from "@/pages/Clients";
 import InvoiceEditor from "@/pages/InvoiceEditor";
 import InvoicesList from "@/pages/InvoicesList";
+import InvoiceArchive from "@/pages/InvoiceArchive";
 import InvoiceDetail from "@/pages/InvoiceDetail";
 import SettingsPage from "@/pages/SettingsPage";
 import Auth from "@/pages/Auth";
@@ -41,6 +42,7 @@ function ProtectedRoutes() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/clients" element={<ClientsPage />} />
         <Route path="/invoices" element={<InvoicesList />} />
+        <Route path="/invoices/archive" element={<InvoiceArchive />} />
         <Route path="/invoices/new" element={<InvoiceEditorRoute />} />
         <Route path="/invoices/:id/edit" element={<InvoiceEditorRoute />} />
         <Route path="/invoices/:id" element={<InvoiceDetail />} />

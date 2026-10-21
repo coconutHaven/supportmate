@@ -1,39 +1,68 @@
-import { useInvoices } from '@/hooks/useInvoices';
+import { useState } from 'react';
+import { useInvoices, type Invoice } from '@/hooks/useInvoices';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { FileText, Plus, Eye, Trash2 } from 'lucide-react';
+import { Archive, FileText, Plus, Eye, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
+import { DeleteInvoiceDialog } from '@/components/invoices/DeleteInvoiceDialog';
 
 export default function InvoicesList() {
-  const { invoices, isLoading, deleteDraft } = useInvoices();
+  const { invoices, isLoading, deleteInvoice, archiveInvoice } = useInvoices();
   const { toast } = useToast();
+  const [pendingDelete, setPendingDelete] = useState<Invoice | null>(null);
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleArchive = async (e: React.MouseEvent, id: string) => {
     e.preventDefault();
-    if (!confirm('Delete this draft invoice?')) return;
+    e.stopPropagation();
     try {
-      await deleteDraft.mutateAsync(id);
-      toast({ title: 'Draft deleted' });
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      await archiveInvoice.mutateAsync(id);
+      toast({ title: 'Invoice archived' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+    }
+  };
+
+  const openDelete = (e: React.MouseEvent, inv: Invoice) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPendingDelete(inv);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete) return;
+    try {
+      await deleteInvoice.mutateAsync(pendingDelete.id);
+      toast({ title: 'Invoice deleted' });
+      setPendingDelete(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
     }
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold font-heading text-foreground flex items-center gap-2">
             <FileText className="w-6 h-6 text-primary" /> Invoices
           </h1>
           <p className="text-muted-foreground">View and manage all your invoices</p>
         </div>
-        <Link to="/invoices/new">
-          <Button className="gradient-primary text-primary-foreground gap-2">
-            <Plus className="w-4 h-4" /> New Invoice
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link to="/invoices/archive">
+            <Button variant="outline" className="gap-2">
+              <Archive className="w-4 h-4" /> Archive
+            </Button>
+          </Link>
+          <Link to="/invoices/new">
+            <Button className="gradient-primary text-primary-foreground gap-2">
+              <Plus className="w-4 h-4" /> New Invoice
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {isLoading ? (
@@ -68,24 +97,33 @@ export default function InvoicesList() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3">
                     <div className="text-right">
                       <p className="font-bold text-foreground">${Number(inv.total_amount).toFixed(2)}</p>
                       <span className={`text-xs px-2 py-1 rounded-full ${
                         inv.status === 'published' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
                       }`}>{inv.status}</span>
                     </div>
-                    {inv.status === 'draft' && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={e => handleDelete(e, inv.id)}
-                        disabled={deleteDraft.isPending}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Archive"
+                      onClick={e => handleArchive(e, inv.id)}
+                      disabled={archiveInvoice.isPending}
+                    >
+                      <Archive className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Delete"
+                      onClick={e => openDelete(e, inv)}
+                      disabled={deleteInvoice.isPending}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                     <Eye className="w-4 h-4 text-muted-foreground" />
                   </div>
                 </CardContent>
@@ -94,6 +132,15 @@ export default function InvoicesList() {
           ))}
         </div>
       )}
+
+      <DeleteInvoiceDialog
+        open={pendingDelete != null}
+        onOpenChange={open => { if (!open) setPendingDelete(null); }}
+        invoiceNumber={pendingDelete?.invoice_number}
+        status={pendingDelete?.status}
+        isPending={deleteInvoice.isPending}
+        onConfirm={handleConfirmDelete}
+      />
     </div>
   );
 }

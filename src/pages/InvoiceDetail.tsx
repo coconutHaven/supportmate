@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useInvoices, InvoiceShift, Expense } from '@/hooks/useInvoices';
 import { useClients } from '@/hooks/useClients';
@@ -6,9 +7,10 @@ import { useUserSettings } from '@/hooks/useUserSettings';
 import type { UserSettings } from '@/hooks/useUserSettings';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { FileText, Download, CheckCircle, ArrowLeft, Trash2, Info, Pencil } from 'lucide-react';
+import { FileText, Download, CheckCircle, ArrowLeft, Trash2, Info, Pencil, Archive, RotateCcw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { DeleteInvoiceDialog } from '@/components/invoices/DeleteInvoiceDialog';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { sortShiftsByDate } from '@/lib/shiftDates';
@@ -102,15 +104,24 @@ function clientPartyText(client: Client | null | undefined): string {
 export default function InvoiceDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { invoices, publishInvoice, deleteDraft } = useInvoices();
+  const { invoices, publishInvoice, deleteInvoice, archiveInvoice, restoreInvoice } = useInvoices();
+  const { invoices: archivedInvoices, isLoading: archivedLoading } = useInvoices(undefined, { archived: true });
   const { clients } = useClients();
   const { settings } = useUserSettings();
   const { toast } = useToast();
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const invoice = invoices.find(i => i.id === id);
+  const invoice = invoices.find(i => i.id === id) ?? archivedInvoices.find(i => i.id === id);
   const client = invoice ? clients.find(c => c.id === invoice.client_id) : null;
+  const isArchived = Boolean(invoice?.archived_at);
 
-  if (!invoice) return <div className="text-center py-12 text-muted-foreground">Loading invoice...</div>;
+  if (!invoice) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        {archivedLoading ? 'Loading invoice...' : 'Invoice not found'}
+      </div>
+    );
+  }
 
   const shifts: InvoiceShift[] = sortShiftsByDate(
     (invoice.invoice_shifts ?? []).map(s => ({
@@ -124,12 +135,34 @@ export default function InvoiceDetail() {
     toast({ title: 'Invoice published! 🎉' });
   };
 
-  const handleDelete = async () => {
-    if (!confirm('Delete this draft invoice? This cannot be undone.')) return;
+  const handleArchive = async () => {
     try {
-      await deleteDraft.mutateAsync(invoice.id);
-      toast({ title: 'Draft deleted' });
-      navigate('/invoices');
+      await archiveInvoice.mutateAsync(invoice.id);
+      toast({ title: 'Invoice archived' });
+      navigate('/invoices/archive');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+    }
+  };
+
+  const handleRestore = async () => {
+    try {
+      await restoreInvoice.mutateAsync(invoice.id);
+      toast({ title: 'Invoice restored' });
+      navigate(`/invoices/${invoice.id}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    try {
+      await deleteInvoice.mutateAsync(invoice.id);
+      toast({ title: 'Invoice deleted' });
+      setDeleteOpen(false);
+      navigate(isArchived ? '/invoices/archive' : '/invoices');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error';
       toast({ title: 'Error', description: message, variant: 'destructive' });
@@ -324,8 +357,12 @@ export default function InvoiceDetail() {
 
   return (
     <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
-      <Button variant="ghost" onClick={() => navigate('/invoices')} className="gap-2">
-        <ArrowLeft className="w-4 h-4" /> Back to Invoices
+      <Button
+        variant="ghost"
+        onClick={() => navigate(isArchived ? '/invoices/archive' : '/invoices')}
+        className="gap-2"
+      >
+        <ArrowLeft className="w-4 h-4" /> {isArchived ? 'Back to Archive' : 'Back to Invoices'}
       </Button>
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -336,9 +373,16 @@ export default function InvoiceDetail() {
           </h1>
           <p className="text-muted-foreground">{client?.name} · {invoice.invoice_date}</p>
         </div>
-        <span className={`self-start px-3 py-1 rounded-full text-sm font-medium ${
-          invoice.status === 'published' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
-        }`}>{invoice.status}</span>
+        <div className="flex flex-wrap gap-2 self-start">
+          {isArchived && (
+            <span className="px-3 py-1 rounded-full text-sm font-medium bg-muted text-muted-foreground">
+              archived
+            </span>
+          )}
+          <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+            invoice.status === 'published' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
+          }`}>{invoice.status}</span>
+        </div>
       </div>
 
       <Card className="shadow-card">
@@ -436,23 +480,49 @@ export default function InvoiceDetail() {
       </Card>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
-        {invoice.status === 'draft' && (
+        {isArchived ? (
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={handleRestore}
+            disabled={restoreInvoice.isPending}
+          >
+            <RotateCcw className="w-4 h-4" /> Restore
+          </Button>
+        ) : (
           <>
+            {invoice.status === 'draft' && (
+              <>
+                <Button
+                  variant="secondary"
+                  className="gap-2 order-first sm:order-none"
+                  onClick={() => navigate(`/invoices/${invoice.id}/edit`)}
+                >
+                  <Pencil className="w-4 h-4" /> Edit draft
+                </Button>
+                <Button onClick={handlePublish} className="gap-2 gradient-primary text-primary-foreground" disabled={publishInvoice.isPending}>
+                  <CheckCircle className="w-4 h-4" /> Publish
+                </Button>
+              </>
+            )}
             <Button
-              variant="secondary"
-              className="gap-2 order-first sm:order-none"
-              onClick={() => navigate(`/invoices/${invoice.id}/edit`)}
+              variant="outline"
+              className="gap-2"
+              onClick={handleArchive}
+              disabled={archiveInvoice.isPending}
             >
-              <Pencil className="w-4 h-4" /> Edit draft
-            </Button>
-            <Button variant="outline" className="gap-2 text-destructive hover:text-destructive" onClick={handleDelete} disabled={deleteDraft.isPending}>
-              <Trash2 className="w-4 h-4" /> Delete Draft
-            </Button>
-            <Button onClick={handlePublish} className="gap-2 gradient-primary text-primary-foreground" disabled={publishInvoice.isPending}>
-              <CheckCircle className="w-4 h-4" /> Publish
+              <Archive className="w-4 h-4" /> Archive
             </Button>
           </>
         )}
+        <Button
+          variant="outline"
+          className="gap-2 text-destructive hover:text-destructive"
+          onClick={() => setDeleteOpen(true)}
+          disabled={deleteInvoice.isPending}
+        >
+          <Trash2 className="w-4 h-4" /> Delete
+        </Button>
         <Button variant="outline" className="gap-2" onClick={generateCalculationsPDF}>
           <Download className="w-4 h-4" /> Calculations PDF
         </Button>
@@ -460,6 +530,15 @@ export default function InvoiceDetail() {
           <Download className="w-4 h-4" /> Invoice PDF
         </Button>
       </div>
+
+      <DeleteInvoiceDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        invoiceNumber={invoice.invoice_number}
+        status={invoice.status}
+        isPending={deleteInvoice.isPending}
+        onConfirm={handleConfirmDelete}
+      />
     </div>
   );
 }

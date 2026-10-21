@@ -37,21 +37,28 @@ export interface Invoice {
   total_amount: number;
   notes: string | null;
   created_at: string;
+  archived_at?: string | null;
   invoice_shifts?: InvoiceShift[];
   clients?: { name: string };
 }
 
-export function useInvoices(clientId?: string) {
+export function useInvoices(clientId?: string, options?: { archived?: boolean }) {
   const queryClient = useQueryClient();
+  const archived = options?.archived === true;
 
   const invoicesQuery = useQuery({
-    queryKey: ['invoices', clientId],
+    queryKey: ['invoices', clientId, archived ? 'archived' : 'active'],
     queryFn: async () => {
-      const invoices = await api.get<Invoice[]>('/invoices');
+      const path = archived ? '/invoices?archived=1' : '/invoices';
+      const invoices = await api.get<Invoice[]>(path);
       if (clientId) return invoices.filter(i => i.client_id === clientId);
       return invoices;
     },
   });
+
+  const invalidateInvoiceQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ['invoices'] });
+  };
 
   const getNextInvoiceNumber = async (cId: string): Promise<number> => {
     const { next } = await api.get<{ next: number }>(`/invoices/next-number/${cId}`);
@@ -62,28 +69,42 @@ export function useInvoices(clientId?: string) {
     mutationFn: async (invoice: { client_id: string; invoice_date: string; shifts: InvoiceShift[]; invoice_number?: number }) => {
       return api.post<Invoice>('/invoices', invoice);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invoices'] }),
+    onSuccess: invalidateInvoiceQueries,
   });
 
-  const deleteDraft = useMutation({
+  const deleteInvoice = useMutation({
     mutationFn: async (id: string) => {
       await api.delete(`/invoices/${id}`);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invoices'] }),
+    onSuccess: invalidateInvoiceQueries,
+  });
+
+  const archiveInvoice = useMutation({
+    mutationFn: async (id: string) => {
+      await api.put(`/invoices/${id}/archive`);
+    },
+    onSuccess: invalidateInvoiceQueries,
+  });
+
+  const restoreInvoice = useMutation({
+    mutationFn: async (id: string) => {
+      await api.put(`/invoices/${id}/restore`);
+    },
+    onSuccess: invalidateInvoiceQueries,
   });
 
   const publishInvoice = useMutation({
     mutationFn: async (id: string) => {
       await api.put(`/invoices/${id}/publish`);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invoices'] }),
+    onSuccess: invalidateInvoiceQueries,
   });
 
   const updateInvoice = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Invoice> & { id: string }) => {
       await api.put(`/invoices/${id}`, updates);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invoices'] }),
+    onSuccess: invalidateInvoiceQueries,
   });
 
   const updateDraftInvoice = useMutation({
@@ -99,7 +120,7 @@ export function useInvoices(clientId?: string) {
         ...(payload.invoice_number != null ? { invoice_number: payload.invoice_number } : {}),
       });
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invoices'] }),
+    onSuccess: invalidateInvoiceQueries,
   });
 
   return {
@@ -109,7 +130,9 @@ export function useInvoices(clientId?: string) {
     publishInvoice,
     updateInvoice,
     updateDraftInvoice,
-    deleteDraft,
+    deleteInvoice,
+    archiveInvoice,
+    restoreInvoice,
     getNextInvoiceNumber,
   };
 }

@@ -115,6 +115,7 @@ ensureColumn('client_rates', 'reference_description', 'TEXT');
 ensureColumn('fixed_shifts', 'reference_description', 'TEXT');
 ensureColumn('invoice_shifts', 'reference_description', 'TEXT');
 ensureColumn('invoice_shifts', 'fixed_shift_id', 'TEXT');
+ensureColumn('invoices', 'archived_at', 'TEXT');
 
 const app = express();
 app.use(express.json());
@@ -238,7 +239,10 @@ function parseExpenses(raw) {
 }
 
 app.get('/api/invoices', (req, res) => {
-  const invoices = db.prepare('SELECT * FROM invoices ORDER BY invoice_number DESC').all();
+  const archived = req.query.archived === '1' || req.query.archived === 'true';
+  const invoices = archived
+    ? db.prepare('SELECT * FROM invoices WHERE archived_at IS NOT NULL ORDER BY archived_at DESC, invoice_number DESC').all()
+    : db.prepare('SELECT * FROM invoices WHERE archived_at IS NULL ORDER BY invoice_number DESC').all();
 
   const clientIds = [...new Set(invoices.map(i => i.client_id))];
   const clientMap = {};
@@ -337,6 +341,7 @@ app.put('/api/invoices/:id', (req, res) => {
 app.put('/api/invoices/:id/draft', (req, res) => {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id);
   if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+  if (inv.archived_at) return res.status(400).json({ error: 'Restore the invoice before editing' });
   if (inv.status !== 'draft') return res.status(400).json({ error: 'Only draft invoices can be edited' });
 
   const { invoice_date, shifts, invoice_number: bodyInvoiceNumber } = req.body;
@@ -397,14 +402,33 @@ app.put('/api/invoices/:id/draft', (req, res) => {
 });
 
 app.put('/api/invoices/:id/publish', (req, res) => {
+  const inv = db.prepare('SELECT id, archived_at FROM invoices WHERE id = ?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+  if (inv.archived_at) return res.status(400).json({ error: 'Restore the invoice before publishing' });
   db.prepare("UPDATE invoices SET status = 'published', updated_at = datetime('now') WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
 });
 
+app.put('/api/invoices/:id/archive', (req, res) => {
+  const inv = db.prepare('SELECT id, archived_at FROM invoices WHERE id = ?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+  if (inv.archived_at) return res.status(400).json({ error: 'Invoice is already archived' });
+  db.prepare("UPDATE invoices SET archived_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.put('/api/invoices/:id/restore', (req, res) => {
+  const inv = db.prepare('SELECT id, archived_at FROM invoices WHERE id = ?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+  if (!inv.archived_at) return res.status(400).json({ error: 'Invoice is not archived' });
+  db.prepare("UPDATE invoices SET archived_at = NULL, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
+});
+
 app.delete('/api/invoices/:id', (req, res) => {
-  const result = db.prepare("DELETE FROM invoices WHERE id = ? AND status = 'draft'").run(req.params.id);
+  const result = db.prepare('DELETE FROM invoices WHERE id = ?').run(req.params.id);
   if (result.changes === 0) {
-    return res.status(400).json({ error: 'Can only delete draft invoices' });
+    return res.status(404).json({ error: 'Invoice not found' });
   }
   res.json({ ok: true });
 });

@@ -41,18 +41,23 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </div>
 
           <nav className="hidden md:flex items-center gap-1">
-            {navItems.map((item) => (
-              <Link key={item.to} to={item.to}>
-                <Button
-                  variant={location.pathname === item.to ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="gap-2"
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                </Button>
-              </Link>
-            ))}
+            {navItems.map((item) => {
+              const active = item.to === '/'
+                ? location.pathname === '/'
+                : location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
+              return (
+                <Link key={item.to} to={item.to}>
+                  <Button
+                    variant={active ? 'secondary' : 'ghost'}
+                    size="sm"
+                    className="gap-2"
+                  >
+                    <item.icon className="w-4 h-4" />
+                    {item.label}
+                  </Button>
+                </Link>
+              );
+            })}
           </nav>
 
           <div className="flex items-center gap-2">
@@ -81,17 +86,22 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       {mobileOpen && (
         <div className="md:hidden border-b border-border bg-card p-4 animate-fade-in">
           <nav className="flex flex-col gap-1">
-            {navItems.map((item) => (
-              <Link key={item.to} to={item.to} onClick={() => setMobileOpen(false)}>
-                <Button
-                  variant={location.pathname === item.to ? 'secondary' : 'ghost'}
-                  className="w-full justify-start gap-2"
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                </Button>
-              </Link>
-            ))}
+            {navItems.map((item) => {
+              const active = item.to === '/'
+                ? location.pathname === '/'
+                : location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
+              return (
+                <Link key={item.to} to={item.to} onClick={() => setMobileOpen(false)}>
+                  <Button
+                    variant={active ? 'secondary' : 'ghost'}
+                    className="w-full justify-start gap-2"
+                  >
+                    <item.icon className="w-4 h-4" />
+                    {item.label}
+                  </Button>
+                </Link>
+              );
+            })}
           </nav>
         </div>
       )}

@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { useClients, useClientRates, useFixedShifts, FixedShiftExpense } from '@/hooks/useClients';
+import { useClients, useClientRates, useFixedShifts, FixedShiftExpense, type Client } from '@/hooks/useClients';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Plus, Trash2, Users, ChevronDown, ChevronUp, Pencil, Save, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -176,7 +176,7 @@ function FixedShiftsSection({ clientId }: { clientId: string }) {
                     {editForm.expenses.map((exp, i) => (
                       <span key={i} className="inline-flex items-center gap-1 text-xs bg-background px-2 py-1 rounded-full border">
                         {exp.name}: ${exp.amount.toFixed(2)}
-                        <button onClick={() => removeEditExpense(i)} className="hover:text-destructive">×</button>
+                        <button type="button" onClick={() => removeEditExpense(i)} className="inline-flex h-4 w-4 items-center justify-center rounded-full cursor-pointer transition-colors hover:bg-destructive/15 hover:text-destructive active:bg-destructive/25 active:scale-90">×</button>
                       </span>
                     ))}
                   </div>
@@ -245,38 +245,86 @@ function FixedShiftsSection({ clientId }: { clientId: string }) {
   );
 }
 
+const EMPTY_CLIENT_FORM = {
+  name: '',
+  email: '',
+  phone: '',
+  address: '',
+  service_description: 'Assistance to Access Community and Social participation',
+  ref_number: '04_104_0125_6_1',
+  hourly_rate: '44.00',
+  km_rate: '0.95',
+};
+
+function formFromClient(client: Client) {
+  return {
+    name: client.name,
+    email: client.email ?? '',
+    phone: client.phone ?? '',
+    address: client.address ?? '',
+    service_description: client.service_description ?? '',
+    ref_number: client.ref_number ?? '',
+    hourly_rate: client.hourly_rate != null ? String(client.hourly_rate) : '',
+    km_rate: client.km_rate != null ? String(client.km_rate) : '',
+  };
+}
+
 export default function ClientsPage() {
-  const { clients, isLoading, createClient, deleteClient } = useClients();
+  const { clients, isLoading, createClient, updateClient, deleteClient } = useClients();
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingClientId, setEditingClientId] = useState<string | null>(null);
   const [expandedClient, setExpandedClient] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    name: '', email: '', phone: '', address: '',
-    service_description: 'Assistance to Access Community and Social participation',
-    ref_number: '04_104_0125_6_1',
-    hourly_rate: '44.00', km_rate: '0.95',
-  });
+  const [form, setForm] = useState(EMPTY_CLIENT_FORM);
 
-  const handleCreate = async () => {
-    if (!form.name) { toast({ title: 'Please enter a name', variant: 'destructive' }); return; }
+  const openCreate = () => {
+    setEditingClientId(null);
+    setForm(EMPTY_CLIENT_FORM);
+    setDialogOpen(true);
+  };
+
+  const openEdit = (client: Client) => {
+    setEditingClientId(client.id);
+    setForm(formFromClient(client));
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    const name = form.name.trim();
+    if (!name) { toast({ title: 'Please enter a name', variant: 'destructive' }); return; }
+    const hourlyRate = parseFloat(form.hourly_rate);
+    const kmRate = parseFloat(form.km_rate);
+    if (!Number.isFinite(hourlyRate) || !Number.isFinite(kmRate)) {
+      toast({ title: 'Enter valid hourly and km rates', variant: 'destructive' });
+      return;
+    }
+    const payload = {
+      name,
+      email: form.email.trim() || null,
+      phone: form.phone.trim() || null,
+      address: form.address.trim() || null,
+      service_description: form.service_description.trim() || null,
+      ref_number: form.ref_number.trim() || null,
+      hourly_rate: hourlyRate,
+      km_rate: kmRate,
+    };
     try {
-      await createClient.mutateAsync({
-        name: form.name,
-        email: form.email || null,
-        phone: form.phone || null,
-        address: form.address || null,
-        service_description: form.service_description,
-        ref_number: form.ref_number,
-        hourly_rate: parseFloat(form.hourly_rate),
-        km_rate: parseFloat(form.km_rate),
-      });
-      toast({ title: 'Client added!' });
+      if (editingClientId) {
+        await updateClient.mutateAsync({ id: editingClientId, ...payload });
+        toast({ title: 'Client updated' });
+      } else {
+        await createClient.mutateAsync(payload);
+        toast({ title: 'Client added!' });
+      }
       setDialogOpen(false);
-      setForm({ name: '', email: '', phone: '', address: '', service_description: 'Assistance to Access Community and Social participation', ref_number: '04_104_0125_6_1', hourly_rate: '44.00', km_rate: '0.95' });
+      setEditingClientId(null);
+      setForm(EMPTY_CLIENT_FORM);
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     }
   };
+
+  const saving = createClient.isPending || updateClient.isPending;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -287,15 +335,13 @@ export default function ClientsPage() {
           </h1>
           <p className="text-muted-foreground">Manage your NDIS clients and their rates</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="gradient-primary text-primary-foreground gap-2">
-              <Plus className="w-4 h-4" /> Add Client
-            </Button>
-          </DialogTrigger>
+        <Button className="gradient-primary text-primary-foreground gap-2" onClick={openCreate}>
+          <Plus className="w-4 h-4" /> Add Client
+        </Button>
+        <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) setEditingClientId(null); }}>
           <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="font-heading">New Client</DialogTitle>
+              <DialogTitle className="font-heading">{editingClientId ? 'Edit Client' : 'New Client'}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div>
@@ -313,8 +359,8 @@ export default function ClientsPage() {
                 <div><Label>Hourly Rate ($)</Label><Input type="number" step="0.01" value={form.hourly_rate} onChange={e => setForm({...form, hourly_rate: e.target.value})} /></div>
                 <div><Label>KM Rate ($)</Label><Input type="number" step="0.01" value={form.km_rate} onChange={e => setForm({...form, km_rate: e.target.value})} /></div>
               </div>
-              <Button onClick={handleCreate} className="w-full gradient-primary text-primary-foreground" disabled={createClient.isPending}>
-                {createClient.isPending ? 'Creating...' : 'Create Client'}
+              <Button onClick={handleSave} className="w-full gradient-primary text-primary-foreground" disabled={saving}>
+                {saving ? 'Saving...' : editingClientId ? 'Save Changes' : 'Create Client'}
               </Button>
             </div>
           </DialogContent>
@@ -345,7 +391,10 @@ export default function ClientsPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); deleteClient.mutate(client.id); }}>
+                    <Button variant="ghost" size="icon" aria-label={`Edit ${client.name}`} onClick={(e) => { e.stopPropagation(); openEdit(client); }}>
+                      <Pencil className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" aria-label={`Delete ${client.name}`} onClick={(e) => { e.stopPropagation(); deleteClient.mutate(client.id); }}>
                       <Trash2 className="w-4 h-4 text-destructive" />
                     </Button>
                     {expandedClient === client.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}

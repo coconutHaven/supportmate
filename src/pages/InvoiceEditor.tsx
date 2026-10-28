@@ -72,6 +72,22 @@ function countMatchingSiblings(shifts: InvoiceShift[], index: number): number {
   return shifts.filter((s, i) => i !== index && shiftsMatchGroup(source, s)).length;
 }
 
+function resolveFixedShiftTemplate(shift: InvoiceShift, fixedShifts: FixedShift[]): FixedShift | null {
+  if (shift.fixed_shift_id) {
+    return fixedShifts.find(fs => fs.id === shift.fixed_shift_id) ?? null;
+  }
+  const dayIndex = DAY_NAMES.indexOf(shift.day_name);
+  if (dayIndex < 0) return null;
+  const rateName = shift.rate_name || 'Standard';
+  const byDayAndRate = fixedShifts.filter(
+    fs => fs.day_of_week === dayIndex && (fs.rate_name || 'Standard') === rateName,
+  );
+  if (byDayAndRate.length === 1) return byDayAndRate[0];
+  const byDay = fixedShifts.filter(fs => fs.day_of_week === dayIndex);
+  if (byDay.length === 1) return byDay[0];
+  return null;
+}
+
 function withShiftDate(shift: InvoiceShift, date: Date): InvoiceShift {
   return {
     ...shift,
@@ -113,7 +129,6 @@ function ShiftRow({ shift, index, onChange, onRemove, clientRates, previousRefs,
   const baselineRef = useRef<InvoiceShift | null>(null);
 
   const isFromTemplate = Boolean(shift.fixed_shift_id && template);
-  const isCustom = !shift.fixed_shift_id;
 
   const update = (field: string, value: unknown) => {
     onChange(index, { ...shift, [field]: value });
@@ -240,7 +255,7 @@ function ShiftRow({ shift, index, onChange, onRemove, clientRates, previousRefs,
         )}
 
         <div className="mt-2 space-y-2">
-          {isCustom && previousRefs.length > 0 && (
+          {previousRefs.length > 0 && (
             <div>
               <Label className="text-xs">Previously used</Label>
               <select
@@ -283,9 +298,16 @@ function ShiftRow({ shift, index, onChange, onRemove, clientRates, previousRefs,
               onChange={e => {
                 const next = e.target.value || null;
                 const known = next ? DEFAULT_REFERENCE_DESCRIPTIONS[next] : undefined;
-                const nextDesc = shift.reference_description
-                  || known
-                  || null;
+                const prevKnown = shift.reference_number
+                  ? DEFAULT_REFERENCE_DESCRIPTIONS[shift.reference_number]
+                  : undefined;
+                const keepCustom = Boolean(
+                  shift.reference_description?.trim()
+                  && shift.reference_description !== prevKnown,
+                );
+                const nextDesc = keepCustom
+                  ? shift.reference_description
+                  : (known ?? shift.reference_description ?? null);
                 onChange(index, { ...shift, reference_number: next, reference_description: nextDesc });
               }}
               placeholder="e.g. 04_104_0125_6_1"
@@ -327,7 +349,7 @@ function ShiftRow({ shift, index, onChange, onRemove, clientRates, previousRefs,
               {shift.expenses.map((exp, i) => (
                 <span key={i} className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-1 rounded-full">
                   {exp.name}: ${exp.amount.toFixed(2)}
-                  <button type="button" onClick={() => removeExpense(i)} className="hover:text-destructive">×</button>
+                  <button type="button" onClick={() => removeExpense(i)} className="inline-flex h-4 w-4 items-center justify-center rounded-full cursor-pointer transition-colors hover:bg-destructive/15 hover:text-destructive active:bg-destructive/25 active:scale-90">×</button>
                 </span>
               ))}
             </div>
@@ -375,7 +397,7 @@ export default function InvoiceEditor() {
     index: number;
     edited: InvoiceShift;
     siblingCount: number;
-    hasTemplate: boolean;
+    templateFixedShiftId: string | null;
     templateDayName: string;
   } | null>(null);
 
@@ -419,11 +441,14 @@ export default function InvoiceEditor() {
       clientDescription: selectedClient?.service_description,
       rates: selectedClient?.client_rates,
       fixedShifts: selectedClient?.fixed_shifts,
-      invoiceShifts: invoices
-        .filter(inv => inv.client_id === clientId)
-        .flatMap(inv => inv.invoice_shifts ?? []),
+      invoiceShifts: [
+        ...shifts,
+        ...invoices
+          .filter(inv => inv.client_id === clientId)
+          .flatMap(inv => inv.invoice_shifts ?? []),
+      ],
     }),
-    [selectedClient, invoices, clientId]
+    [selectedClient, invoices, clientId, shifts],
   );
 
   useEffect(() => {
@@ -454,31 +479,40 @@ export default function InvoiceEditor() {
   };
 
   const handleShiftEditComplete = (index: number, _baseline: InvoiceShift, current: InvoiceShift) => {
+    // Custom shifts are one-off rows. Only weekly template shifts offer to persist edits.
+    if (!current.fixed_shift_id) return;
+
     const siblingCount = countMatchingSiblings(shifts, index);
-    const template = selectedClient?.fixed_shifts?.find(fs => fs.id === current.fixed_shift_id);
-    const hasTemplate = Boolean(current.fixed_shift_id && template);
-    if (siblingCount === 0 && !hasTemplate) return;
+    const fixedShifts = selectedClient?.fixed_shifts ?? [];
+    const template = resolveFixedShiftTemplate(current, fixedShifts);
+    const templateFixedShiftId = template?.id ?? current.fixed_shift_id ?? null;
 
     setApplyDialog({
       index,
-      edited: current,
+      edited: templateFixedShiftId && !current.fixed_shift_id
+        ? { ...current, fixed_shift_id: templateFixedShiftId }
+        : current,
       siblingCount,
-      hasTemplate,
+      templateFixedShiftId,
       templateDayName: template != null ? FULL_DAY_NAMES[template.day_of_week] : current.day_name,
     });
   };
 
-  const applyToMatchingOnInvoice = () => {
-    if (!applyDialog) return;
-    const { index, edited } = applyDialog;
+  const applyMatchingOnInvoice = (dialog: NonNullable<typeof applyDialog>): InvoiceShift[] => {
+    const { index, edited } = dialog;
     const source = shifts[index] ?? edited;
-    const updated = shifts.map((s, i) => {
+    return shifts.map((s, i) => {
       if (i === index) return s;
       if (shiftsMatchGroup(source, s)) {
         return applyPropagatableFields(s, edited);
       }
       return s;
     });
+  };
+
+  const applyToMatchingOnInvoice = () => {
+    if (!applyDialog) return;
+    const updated = applyMatchingOnInvoice(applyDialog);
     setShifts(recalcShifts(updated));
     setApplyDialog(null);
     toast({
@@ -488,11 +522,12 @@ export default function InvoiceEditor() {
   };
 
   const applyToClientTemplate = () => {
-    if (!applyDialog) return;
-    const { edited } = applyDialog;
-    if (!edited.fixed_shift_id) return;
+    if (!applyDialog?.templateFixedShiftId) return;
+    const { edited, siblingCount } = applyDialog;
+    const updated = applyMatchingOnInvoice(applyDialog);
+    setShifts(recalcShifts(updated));
     updateShift.mutate({
-      id: edited.fixed_shift_id,
+      id: applyDialog.templateFixedShiftId,
       reference_number: edited.reference_number ?? null,
       reference_description: edited.reference_description ?? null,
       default_hours: edited.hours,
@@ -504,7 +539,9 @@ export default function InvoiceEditor() {
     setApplyDialog(null);
     toast({
       title: 'Weekly template updated',
-      description: 'Future invoices generated from this client profile will use these values.',
+      description: siblingCount > 0
+        ? `Applied to ${siblingCount} matching shift${siblingCount !== 1 ? 's' : ''} on this invoice and saved to the client profile.`
+        : 'Future invoices generated from this client profile will use these values.',
     });
   };
 
@@ -816,34 +853,33 @@ export default function InvoiceEditor() {
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
                   You edited a {applyDialog?.templateDayName ?? 'weekly'} shift
-                  {applyDialog?.hasTemplate ? ' from this client\'s weekly template' : ''}.
+                  {applyDialog?.templateFixedShiftId ? ' linked to this client\'s weekly template' : ''}.
                 </p>
-                {applyDialog && applyDialog.siblingCount > 0 && (
-                  <p>
-                    {applyDialog.siblingCount} other matching shift{applyDialog.siblingCount !== 1 ? 's' : ''} on this invoice
-                    can be updated with the same hours, rates, mileage, and reference details.
-                  </p>
-                )}
-                {applyDialog?.hasTemplate && (
-                  <p>
-                    You can also save these values to the client&apos;s weekly shift profile for future invoices.
-                  </p>
-                )}
+                <p>
+                  {applyDialog?.siblingCount ?? 0} other matching shift{(applyDialog?.siblingCount ?? 0) !== 1 ? 's' : ''} on this invoice
+                  can be updated with the same hours, rates, mileage, and reference details.
+                </p>
+                <p>
+                  You can also save these values to the client&apos;s weekly shift profile for future invoices
+                  (this also applies to all matching shifts on this invoice).
+                </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
             <AlertDialogCancel className="mt-0">This shift only</AlertDialogCancel>
-            {applyDialog && applyDialog.siblingCount > 0 && (
-              <AlertDialogAction onClick={applyToMatchingOnInvoice}>
-                All matching on this invoice ({applyDialog.siblingCount})
-              </AlertDialogAction>
-            )}
-            {applyDialog?.hasTemplate && (
-              <AlertDialogAction onClick={applyToClientTemplate}>
-                Update client weekly template
-              </AlertDialogAction>
-            )}
+            <AlertDialogAction
+              onClick={applyToMatchingOnInvoice}
+              disabled={!applyDialog || applyDialog.siblingCount === 0}
+            >
+              All matching on this invoice ({applyDialog?.siblingCount ?? 0})
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={applyToClientTemplate}
+              disabled={!applyDialog?.templateFixedShiftId}
+            >
+              Update client weekly template (+ all matching on invoice)
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
